@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Proformax - Agente IA</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* HEADER */
+    header {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    header h1 {
+      font-size: 18px;
+      color: #58a6ff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    header h1 span { font-size: 22px; }
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    #status-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #3fb950;
+      box-shadow: 0 0 6px #3fb950;
+    }
+    #status-text { font-size: 13px; color: #8b949e; }
+
+    /* LAYOUT PRINCIPAL */
+    .main-layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* PANEL IZQUIERDO - ANÁLISIS */
+    .analysis-panel {
+      width: 420px;
+      min-width: 320px;
+      background: #161b22;
+      border-right: 1px solid #30363d;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 16px 20px 12px;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .panel-header h2 { font-size: 14px; color: #8b949e; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; }
+    .panel-header small { font-size: 11px; color: #484f58; }
+    .refresh-btn {
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #8b949e;
+      padding: 5px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+    .refresh-btn:hover { background: #30363d; color: #e6edf3; }
+    .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .analysis-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      line-height: 1.7;
+      font-size: 14px;
+      color: #c9d1d9;
+    }
+    .analysis-content::-webkit-scrollbar { width: 6px; }
+    .analysis-content::-webkit-scrollbar-track { background: transparent; }
+    .analysis-content::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+    .analysis-placeholder {
+      text-align: center;
+      padding: 40px 20px;
+      color: #484f58;
+    }
+    .analysis-placeholder .icon { font-size: 48px; margin-bottom: 12px; }
+
+    /* Estilos del markdown parseado */
+    .analysis-content h1, .analysis-content h2 { color: #58a6ff; margin: 16px 0 8px; font-size: 15px; }
+    .analysis-content h3 { color: #79c0ff; margin: 12px 0 6px; font-size: 14px; }
+    .analysis-content strong { color: #ffa657; }
+    .analysis-content ul { padding-left: 20px; margin: 6px 0; }
+    .analysis-content li { margin: 4px 0; }
+    .analysis-content p { margin: 8px 0; }
+    .analysis-content code { background: #21262d; padding: 1px 6px; border-radius: 4px; font-size: 12px; color: #ff7b72; }
+
+    /* STATS CARDS */
+    .stats-bar {
+      padding: 14px 20px;
+      border-top: 1px solid #30363d;
+      display: flex;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .stat-card {
+      flex: 1;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+    }
+    .stat-card .val { font-size: 22px; font-weight: 700; }
+    .stat-card .lbl { font-size: 10px; color: #8b949e; text-transform: uppercase; margin-top: 2px; }
+    .val-green { color: #3fb950; }
+    .val-yellow { color: #d29922; }
+    .val-red { color: #f85149; }
+    .val-blue { color: #58a6ff; }
+
+    /* PANEL DERECHO - CHAT */
+    .chat-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .chat-messages::-webkit-scrollbar { width: 6px; }
+    .chat-messages::-webkit-scrollbar-track { background: transparent; }
+    .chat-messages::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+    .msg {
+      display: flex;
+      gap: 12px;
+      max-width: 80%;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+    .msg.agent { align-self: flex-start; }
+
+    .msg-avatar {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .msg.agent .msg-avatar { background: #1f6feb; }
+    .msg.user .msg-avatar { background: #21262d; border: 1px solid #30363d; }
+
+    .msg-bubble {
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.6;
+      max-width: 100%;
+    }
+    .msg.agent .msg-bubble {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-top-left-radius: 4px;
+      color: #c9d1d9;
+    }
+    .msg.user .msg-bubble {
+      background: #1f6feb;
+      border-top-right-radius: 4px;
+      color: #fff;
+    }
+    .msg-bubble strong { color: #ffa657; }
+    .msg-bubble h1, .msg-bubble h2, .msg-bubble h3 { color: #79c0ff; margin: 8px 0 4px; font-size: 14px; }
+    .msg-bubble ul { padding-left: 18px; margin: 6px 0; }
+    .msg-bubble li { margin: 3px 0; }
+    .msg-bubble code { background: #0d1117; padding: 1px 5px; border-radius: 4px; font-size: 12px; color: #ff7b72; }
+
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 14px 16px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      border-top-left-radius: 4px;
+    }
+    .typing-indicator span {
+      width: 7px; height: 7px;
+      background: #58a6ff;
+      border-radius: 50%;
+      animation: bounce 1.2s infinite;
+    }
+    .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+      40% { transform: translateY(-6px); opacity: 1; }
+    }
+
+    /* QUICK QUESTIONS */
+    .quick-questions {
+      padding: 0 24px 12px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .quick-btn {
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #8b949e;
+      padding: 6px 12px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+    .quick-btn:hover { background: #1f6feb22; border-color: #1f6feb; color: #58a6ff; }
+
+    /* INPUT */
+    .chat-input-area {
+      padding: 16px 24px 20px;
+      border-top: 1px solid #30363d;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+      flex-shrink: 0;
+    }
+    .chat-input-area textarea {
+      flex: 1;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      color: #e6edf3;
+      font-size: 14px;
+      padding: 12px 14px;
+      resize: none;
+      min-height: 48px;
+      max-height: 120px;
+      outline: none;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+    .chat-input-area textarea:focus { border-color: #1f6feb; }
+    .chat-input-area textarea::placeholder { color: #484f58; }
+    .send-btn {
+      background: #1f6feb;
+      border: none;
+      color: white;
+      width: 48px; height: 48px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 18px;
+      transition: background 0.2s;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .send-btn:hover { background: #388bfd; }
+    .send-btn:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+
+    .welcome-msg {
+      text-align: center;
+      padding: 60px 40px;
+      color: #484f58;
+    }
+    .welcome-msg .icon { font-size: 56px; margin-bottom: 16px; }
+    .welcome-msg h2 { color: #8b949e; font-size: 18px; margin-bottom: 8px; }
+    .welcome-msg p { font-size: 14px; line-height: 1.6; }
+
+    /* TABS */
+    .tab-bar {
+      display: flex;
+      border-bottom: 1px solid #30363d;
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      flex: 1;
+      background: none;
+      border: none;
+      color: #8b949e;
+      padding: 11px 8px;
+      font-size: 12px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+    .tab-btn:hover { color: #e6edf3; }
+    .tab-btn.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+    .tab-pane { display: none; flex: 1; overflow-y: auto; }
+    .tab-pane.active { display: flex; flex-direction: column; }
+
+    /* PDFs */
+    .docs-section { padding: 16px; flex: 1; }
+    .drop-zone {
+      border: 2px dashed #30363d;
+      border-radius: 10px;
+      padding: 28px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 16px;
+    }
+    .drop-zone:hover, .drop-zone.dragover { border-color: #58a6ff; background: #1f6feb11; }
+    .drop-zone .dz-icon { font-size: 32px; margin-bottom: 8px; }
+    .drop-zone p { font-size: 13px; color: #8b949e; margin: 0; }
+    .drop-zone small { font-size: 11px; color: #484f58; }
+    #pdf-input { display: none; }
+    .doc-list { display: flex; flex-direction: column; gap: 8px; }
+    .doc-item {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .doc-item .doc-info { flex: 1; min-width: 0; }
+    .doc-item .doc-name { font-size: 13px; color: #e6edf3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .doc-item .doc-meta { font-size: 11px; color: #484f58; margin-top: 2px; }
+    .doc-del {
+      background: none; border: none; color: #484f58;
+      cursor: pointer; font-size: 16px; padding: 2px 6px;
+      border-radius: 4px; transition: all 0.2s;
+    }
+    .doc-del:hover { color: #f85149; background: #f8514920; }
+
+    /* EMAIL */
+    .email-section { padding: 16px; }
+    .email-status {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 14px;
+      font-size: 13px;
+    }
+    .email-status .es-row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+    .email-status .es-label { color: #8b949e; }
+    .email-status .es-value { color: #e6edf3; }
+    .badge-ok { color: #3fb950; }
+    .badge-warn { color: #d29922; }
+    .send-email-btn {
+      width: 100%;
+      background: #1f6feb;
+      border: none;
+      color: #fff;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-bottom: 10px;
+    }
+    .send-email-btn:hover { background: #388bfd; }
+    .send-email-btn:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+    .email-info {
+      font-size: 12px;
+      color: #484f58;
+      text-align: center;
+      line-height: 1.5;
+    }
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 14px 20px;
+      font-size: 14px;
+      color: #e6edf3;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+      z-index: 9999;
+      animation: slideIn 0.3s ease;
+      max-width: 320px;
+    }
+    @keyframes slideIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1><span>🤖</span> Proformax — Agente IA de Proyecto</h1>
+  <div class="header-right">
+    <div id="status-dot"></div>
+    <span id="status-text">Conectando...</span>
+  </div>
+</header>
+
+<div class="main-layout">
+
+  <!-- PANEL IZQUIERDO: ANÁLISIS + DOCS + EMAIL -->
+  <div class="analysis-panel">
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('analysis')">📊 Análisis</button>
+      <button class="tab-btn" onclick="switchTab('docs')">📎 Documentos</button>
+      <button class="tab-btn" onclick="switchTab('email')">✉️ Correo</button>
+    </div>
+
+    <!-- TAB: ANÁLISIS -->
+    <div class="tab-pane active" id="tab-analysis">
+      <div class="panel-header">
+        <div>
+          <h2>Tablero Proformax</h2>
+          <small id="analysis-time">—</small>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="refresh-btn" id="refresh-btn" onclick="refreshAnalysis()">⟳ Actualizar</button>
+          <a href="/api/report/pdf" target="_blank" class="refresh-btn" style="text-decoration:none;color:inherit">⬇ PDF</a>
+        </div>
+      </div>
+      <div class="analysis-content" id="analysis-content">
+        <div class="analysis-placeholder">
+          <div class="icon">⏳</div>
+          <p>Cargando análisis del tablero...</p>
+        </div>
+      </div>
+      <div class="stats-bar" id="stats-bar"></div>
+    </div>
+
+    <!-- TAB: DOCUMENTOS -->
+    <div class="tab-pane" id="tab-docs">
+      <div class="docs-section">
+        <div class="drop-zone" id="drop-zone"
+          onclick="document.getElementById('pdf-input').click()"
+          ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+          <div class="dz-icon">📄</div>
+          <p>Arrastra un PDF aquí o haz clic para subir</p>
+          <small>Máx. 20MB por archivo</small>
+        </div>
+        <input type="file" id="pdf-input" accept=".pdf" onchange="uploadPDF(this.files[0])"/>
+        <div class="doc-list" id="doc-list">
+          <p style="color:#484f58;font-size:13px;text-align:center">Cargando documentos...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: CORREO -->
+    <div class="tab-pane" id="tab-email">
+      <div class="email-section">
+        <div class="email-status" id="email-status">
+          <div class="es-row"><span class="es-label">Estado</span><span class="es-value" id="em-status">Verificando...</span></div>
+          <div class="es-row"><span class="es-label">Remitente</span><span class="es-value" id="em-user">—</span></div>
+          <div class="es-row" style="margin-bottom:0"><span class="es-label">Destinatarios</span><span class="es-value" id="em-team">—</span></div>
+        </div>
+        <button class="send-email-btn" id="send-email-btn" onclick="sendEmail()">
+          📧 Enviar Reporte Ahora al Equipo
+        </button>
+        <div class="email-info">
+          El agente también envía el reporte<br/>
+          <strong style="color:#58a6ff">automáticamente cada día a las 8:00 AM</strong><br/>
+          con el análisis y los documentos PDF subidos.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANEL DERECHO: CHAT -->
+  <div class="chat-panel">
+    <div class="chat-messages" id="chat-messages">
+      <div class="welcome-msg">
+        <div class="icon">💬</div>
+        <h2>Chatea con el Agente</h2>
+        <p>Puedes preguntarme sobre el estado del proyecto,<br/>riesgos, tareas atrasadas o lo que necesites.</p>
+      </div>
+    </div>
+
+    <div class="quick-questions" id="quick-questions">
+      <button class="quick-btn" onclick="askQuick('¿Cuáles son las tareas más urgentes ahora mismo?')">🔥 Tareas urgentes</button>
+      <button class="quick-btn" onclick="askQuick('¿Hay alguna tarea atrasada? ¿Cuál es el riesgo?')">⚠️ Tareas atrasadas</button>
+      <button class="quick-btn" onclick="askQuick('¿Qué tareas no tienen responsable asignado?')">👤 Sin asignar</button>
+      <button class="quick-btn" onclick="askQuick('¿En qué fase real estamos del proyecto hoy?')">📍 Fase actual</button>
+      <button class="quick-btn" onclick="askQuick('Dame un resumen ejecutivo del proyecto para presentar a mi equipo')">📋 Resumen ejecutivo</button>
+      <button class="quick-btn" onclick="askQuick('¿Vamos a llegar a la fecha de entrega?')">📅 Fecha de entrega</button>
+      <a href="/api/report/pdf" target="_blank" class="quick-btn" style="text-decoration:none;background:#1f6feb22;border-color:#1f6feb;color:#58a6ff">⬇ Descargar reporte PDF</a>
+    </div>
+
+    <div class="chat-input-area">
+      <textarea id="chat-input" placeholder="Pregúntame sobre el proyecto..." rows="1"
+        onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      <button class="send-btn" id="send-btn" onclick="sendMessage()">➤</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ──────────────────────────────────────────
+  // ESTADO
+  // ──────────────────────────────────────────
+  let chatHistory = [];
+  let isLoading = false;
+
+  // ──────────────────────────────────────────
+  // TABS
+  // ──────────────────────────────────────────
+  function switchTab(name) {
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      if (b.textContent.toLowerCase().includes(
+        name === 'analysis' ? 'análisis' : name === 'docs' ? 'doc' : 'correo'
+      )) b.classList.add('active');
+    });
+    if (name === 'docs') loadDocs();
+    if (name === 'email') loadEmailConfig();
+  }
+
+  // ──────────────────────────────────────────
+  // MARKDOWN SIMPLE
+  // ──────────────────────────────────────────
+  function parseMarkdown(text) {
+    return text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/`(.+?)`/g, '<code>$1</code>')
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+      .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+      .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/\n/g, '<br/>')
+      .replace(/^(?!<[hul])(.+)$/gm, '<p>$1</p>');
+  }
+
+  // ──────────────────────────────────────────
+  // TOAST
+  // ──────────────────────────────────────────
+  function showToast(msg, ok = true) {
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.innerHTML = `${ok ? '✅' : '❌'} ${msg}`;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 4000);
+  }
+
+  // ──────────────────────────────────────────
+  // DOCUMENTOS PDF
+  // ──────────────────────────────────────────
+  async function loadDocs() {
+    const list = document.getElementById('doc-list');
+    try {
+      const res = await fetch('/api/docs');
+      const docs = await res.json();
+      if (!docs.length) {
+        list.innerHTML = '<p style="color:#484f58;font-size:13px;text-align:center;padding:20px 0">No hay documentos subidos aún.</p>';
+        return;
+      }
+      list.innerHTML = docs.map(d => `
+        <div class="doc-item">
+          <div class="doc-info">
+            <div class="doc-name">📄 ${d.nombre}</div>
+            <div class="doc-meta">${d.tamanio} · Subido: ${d.subido}</div>
+          </div>
+          <button class="doc-del" onclick="deleteDoc('${d.nombre}')" title="Eliminar">🗑</button>
+        </div>`).join('');
+    } catch (e) {
+      list.innerHTML = '<p style="color:#f85149;font-size:13px">Error cargando documentos.</p>';
+    }
+  }
+
+  async function uploadPDF(file) {
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('pdf', file);
+    try {
+      showToast('Subiendo PDF...', true);
+      const res = await fetch('/api/docs/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.ok) { showToast(`PDF subido: ${data.nombre}`); loadDocs(); }
+      else showToast(data.error || 'Error al subir', false);
+    } catch (e) { showToast('Error de conexión', false); }
+    document.getElementById('pdf-input').value = '';
+  }
+
+  async function deleteDoc(nombre) {
+    if (!confirm(`¿Eliminar "${nombre}"?`)) return;
+    try {
+      await fetch('/api/docs/' + encodeURIComponent(nombre), { method: 'DELETE' });
+      showToast('Documento eliminado');
+      loadDocs();
+    } catch (e) { showToast('Error al eliminar', false); }
+  }
+
+  function onDragOver(e) { e.preventDefault(); document.getElementById('drop-zone').classList.add('dragover'); }
+  function onDragLeave(e) { document.getElementById('drop-zone').classList.remove('dragover'); }
+  function onDrop(e) {
+    e.preventDefault();
+    document.getElementById('drop-zone').classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type === 'application/pdf') uploadPDF(file);
+    else showToast('Solo se aceptan archivos PDF', false);
+  }
+
+  // ──────────────────────────────────────────
+  // CORREO
+  // ──────────────────────────────────────────
+  async function loadEmailConfig() {
+    try {
+      const res = await fetch('/api/email/config');
+      const data = await res.json();
+      document.getElementById('em-status').innerHTML = data.configured
+        ? '<span class="badge-ok">✅ Configurado</span>'
+        : '<span class="badge-warn">⚠️ No configurado</span>';
+      document.getElementById('em-user').textContent = data.smtpUser;
+      document.getElementById('em-team').textContent = data.teamEmails;
+      document.getElementById('send-email-btn').disabled = !data.configured;
+    } catch (e) {}
+  }
+
+  async function sendEmail() {
+    const btn = document.getElementById('send-email-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Enviando...';
+    try {
+      const res = await fetch('/api/email/send', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) showToast(`Reporte enviado a ${data.recipients?.length} destinatario(s)`);
+      else showToast('Error: ' + (data.reason || 'desconocido'), false);
+    } catch (e) { showToast('Error de conexión', false); }
+    btn.disabled = false;
+    btn.textContent = '📧 Enviar Reporte Ahora al Equipo';
+  }
+
+  // ──────────────────────────────────────────
+  // ANÁLISIS
+  // ──────────────────────────────────────────
+  async function loadAnalysis() {
+    try {
+      const res = await fetch('/api/analysis');
+      const data = await res.json();
+      renderAnalysis(data);
+      setStatus('Conectado', true);
+    } catch (e) {
+      setStatus('Error de conexión', false);
+    }
+  }
+
+  async function refreshAnalysis() {
+    const btn = document.getElementById('refresh-btn');
+    btn.disabled = true;
+    btn.textContent = '⟳ Analizando...';
+    document.getElementById('analysis-content').innerHTML = `
+      <div class="analysis-placeholder">
+        <div class="icon">⏳</div>
+        <p>Analizando tablero con IA...<br/><small style="color:#484f58">Esto puede tomar hasta 3 minutos</small></p>
+      </div>`;
+    try {
+      const res = await fetch('/api/analysis/refresh', { method: 'POST' });
+      const data = await res.json();
+      renderAnalysis(data);
+    } catch (e) {
+      document.getElementById('analysis-content').innerHTML = '<p style="color:#f85149;padding:20px">Error al obtener análisis.</p>';
+    }
+    btn.disabled = false;
+    btn.textContent = '⟳ Actualizar';
+  }
+
+  function renderAnalysis(data) {
+    document.getElementById('analysis-content').innerHTML = parseMarkdown(data.analysis || 'Sin análisis disponible.');
+    document.getElementById('analysis-time').textContent = data.time ? `Actualizado: ${data.time}` : '';
+    loadStats();
+  }
+
+  async function loadStats() {
+    try {
+      const res = await fetch('/api/board');
+      const { cards = [], lists = [] } = await res.json();
+      const listMap = {};
+      lists.forEach(l => { listMap[l.id] = l.name; });
+      const total = cards.length;
+      const completadas = cards.filter(c => c.completada).length;
+      const ahora = new Date();
+      const atrasadas = cards.filter(c => c.fecha && new Date(c.fecha) < ahora && !c.completada).length;
+      const sinAsignar = cards.filter(c => !c.miembros || c.miembros.length === 0).length;
+      const pct = total ? Math.round(completadas / total * 100) : 0;
+
+      document.getElementById('stats-bar').innerHTML = `
+        <div class="stat-card"><div class="val val-blue">${total}</div><div class="lbl">Total</div></div>
+        <div class="stat-card"><div class="val val-green">${completadas}</div><div class="lbl">Listas</div></div>
+        <div class="stat-card"><div class="val val-yellow">${atrasadas}</div><div class="lbl">Atrasadas</div></div>
+        <div class="stat-card"><div class="val ${pct >= 70 ? 'val-green' : pct >= 40 ? 'val-yellow' : 'val-red'}">${pct}%</div><div class="lbl">Avance</div></div>
+      `;
+    } catch(e) {}
+  }
+
+  // ──────────────────────────────────────────
+  // CHAT
+  // ──────────────────────────────────────────
+  function appendMessage(role, content) {
+    const container = document.getElementById('chat-messages');
+    const welcome = container.querySelector('.welcome-msg');
+    if (welcome) welcome.remove();
+
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    div.innerHTML = `
+      <div class="msg-avatar">${role === 'agent' ? '🤖' : '👤'}</div>
+      <div class="msg-bubble">${role === 'agent' ? parseMarkdown(content) : escapeHtml(content)}</div>
+    `;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    return div;
+  }
+
+  function escapeHtml(t) {
+    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function showTyping() {
+    const container = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = 'msg agent';
+    div.id = 'typing-msg';
+    div.innerHTML = `
+      <div class="msg-avatar">🤖</div>
+      <div class="typing-indicator"><span></span><span></span><span></span></div>
+    `;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function removeTyping() {
+    const el = document.getElementById('typing-msg');
+    if (el) el.remove();
+  }
+
+  async function sendMessage() {
+    const input = document.getElementById('chat-input');
+    const message = input.value.trim();
+    if (!message || isLoading) return;
+
+    input.value = '';
+    input.style.height = 'auto';
+    isLoading = true;
+    document.getElementById('send-btn').disabled = true;
+
+    appendMessage('user', message);
+    chatHistory.push({ role: 'user', content: message });
+    showTyping();
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, history: chatHistory.slice(-10) })
+      });
+      const data = await res.json();
+      removeTyping();
+      const reply = data.reply || 'No pude responder.';
+      appendMessage('agent', reply);
+      chatHistory.push({ role: 'agent', content: reply });
+    } catch (e) {
+      removeTyping();
+      appendMessage('agent', '⚠️ Error de conexión con el servidor.');
+    }
+
+    isLoading = false;
+    document.getElementById('send-btn').disabled = false;
+    input.focus();
+  }
+
+  function askQuick(text) {
+    document.getElementById('chat-input').value = text;
+    sendMessage();
+  }
+
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
+
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  }
+
+  function setStatus(text, ok) {
+    document.getElementById('status-text').textContent = text;
+    document.getElementById('status-dot').style.background = ok ? '#3fb950' : '#f85149';
+    document.getElementById('status-dot').style.boxShadow = ok ? '0 0 6px #3fb950' : '0 0 6px #f85149';
+  }
+
+  // ──────────────────────────────────────────
+  // INICIO
+  // ──────────────────────────────────────────
+  loadAnalysis();
+</script>
+</body>
+</html>
