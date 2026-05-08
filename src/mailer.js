@@ -4,17 +4,63 @@ import { config } from "./config.js";
 
 /**
  * Crea el transporter según la config del .env
+ * Soporta puerto 465 (SSL directo) y 587 (STARTTLS)
  */
-function createTransporter() {
+function createTransporter(port = null) {
+  const usePort = port || Number(config.smtpPort) || 465;
+  const isSecure = usePort === 465;
+
   return nodemailer.createTransport({
     host: config.smtpHost,
-    port: Number(config.smtpPort) || 587,
-    secure: false,
+    port: usePort,
+    secure: isSecure,               // true para 465 (SSL), false para 587 (STARTTLS)
     auth: {
       user: config.smtpUser,
       pass: config.smtpPass
+    },
+    connectionTimeout: 30000,       // 30s para conectar
+    greetingTimeout: 30000,         // 30s para el greeting
+    socketTimeout: 60000,           // 60s para operaciones
+    pool: false,                    // sin pool para evitar problemas en PaaS
+    tls: {
+      rejectUnauthorized: false     // aceptar certificados auto-firmados
     }
   });
+}
+
+/**
+ * Envía un correo con reintentos y fallback de puerto
+ * Intenta primero con el puerto configurado, luego con el alternativo
+ */
+async function sendWithRetry(mailOptions, maxRetries = 3) {
+  const ports = [Number(config.smtpPort) || 465, 587, 465];
+  const uniquePorts = [...new Set(ports)];
+
+  for (const port of uniquePorts) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const transporter = createTransporter(port);
+        console.log(`[Mailer] Intento ${attempt}/${maxRetries} via puerto ${port}...`);
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Mailer] ✓ Enviado via puerto ${port} al intento ${attempt}`);
+        return info;
+      } catch (err) {
+        const isTimeout = err.message.includes("timeout") || err.message.includes("ETIMEDOUT") || err.code === "ESOCKET";
+        console.warn(`[Mailer] ✗ Puerto ${port}, intento ${attempt}: ${err.message}`);
+
+        if (attempt < maxRetries && isTimeout) {
+          const delay = attempt * 5000; // 5s, 10s, 15s
+          console.log(`[Mailer] Reintentando en ${delay / 1000}s...`);
+          await new Promise(r => setTimeout(r, delay));
+        } else if (attempt === maxRetries) {
+          console.warn(`[Mailer] Agotados reintentos para puerto ${port}`);
+          break; // probar siguiente puerto
+        }
+      }
+    }
+  }
+
+  throw new Error("No se pudo enviar el correo después de todos los intentos y puertos");
 }
 
 /**
@@ -49,7 +95,6 @@ export async function sendProgressReport(analysis, pdfsLeidos = [], stats = {}) 
     return { ok: false, reason: "Sin configuración SMTP" };
   }
 
-  const transporter = createTransporter();
   const recipients = config.teamEmails.split(",").map(e => e.trim()).filter(Boolean);
   const fecha = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
 
@@ -128,7 +173,7 @@ export async function sendProgressReport(analysis, pdfsLeidos = [], stats = {}) 
 </html>`;
 
   try {
-    const info = await transporter.sendMail({
+    const info = await sendWithRetry({
       from: `"Agente IA Proformax" <${config.smtpUser}>`,
       to: recipients.join(", "),
       subject: `📊 Reporte Proformax — ${fecha} | Avance: ${stats.pct || 0}%`,
@@ -153,7 +198,6 @@ export async function sendAlertEmail(tareasAtrasadas, allCards = []) {
     return { ok: false, reason: "Sin configuración SMTP" };
   }
 
-  const transporter = createTransporter();
   const recipients = config.teamEmails.split(",").map(e => e.trim()).filter(Boolean);
   const fecha = new Date().toLocaleString("es-ES");
 
@@ -200,7 +244,7 @@ export async function sendAlertEmail(tareasAtrasadas, allCards = []) {
 </body></html>`;
 
   try {
-    const info = await transporter.sendMail({
+    const info = await sendWithRetry({
       from: `"⚠️ Alerta Proformax" <${config.smtpUser}>`,
       to: recipients.join(", "),
       subject: `⚠️ ALERTA: ${tareasAtrasadas.length} tarea(s) atrasada(s) — ${new Date().toLocaleDateString("es-ES")}`,
