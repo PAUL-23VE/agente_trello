@@ -129,8 +129,8 @@ async function runAnalysis() {
   const historySummary = getHistorySummary(store);
   const pdfCtxConHistorial = cachedPdfContext + (historySummary ? "\n\n" + historySummary : "");
   
-  // Limitar contexto para evitar Rate Limit (12K TPM en Groq Free)
-  const pdfContextLimitado = pdfCtxConHistorial.slice(0, 6000);
+  // Limitar contexto para evitar Rate Limit (6K TPM en modelo 8B instant)
+  const pdfContextLimitado = pdfCtxConHistorial.slice(0, 2000);
 
   console.log("[Agente] Analizando con IA...");
   let result = null;
@@ -218,9 +218,9 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
-    // Contexto completo = tablero + PDFs (optimizado para Groq free: 12K TPM)
-    const ctxCompleto = tablero.slice(0, 3000) +
-      (cachedPdfContext ? "\n\n" + cachedPdfContext.slice(0, 6000) : "");
+    // Contexto completo = tablero + PDFs (optimizado para Groq 8B: 6K TPM)
+    const ctxCompleto = tablero.slice(0, 1500) +
+      (cachedPdfContext ? "\n\n" + cachedPdfContext.slice(0, 1500) : "");
 
     const reply = await chat(message, ctxCompleto, history);
     res.json({ reply });

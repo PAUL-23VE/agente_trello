@@ -72,7 +72,6 @@ export async function analyze(cards, lists, atrasadas = [], sinAsignar = [], pdf
     nombre: c.nombre,
     fecha: c.fecha,
     estado: listMap[c.estado],
-    descripcion: c.descripcion,
     miembros: c.miembros?.length || 0,
     completada: c.completada
   }));
@@ -123,7 +122,7 @@ REGLAS ESTRICTAS:
 - Usa los nombres REALES de las tareas
 - Sé crítico y honesto, no optimista sin datos
 - La fase de una tarea NO significa que esté hecha
-${pdfContext ? `\n${pdfContext.slice(0, 20000)}` : ""}
+${pdfContext ? `\n${pdfContext.slice(0, 2000)}` : ""}
 `;
 
   return await callGroq(prompt, {
@@ -137,11 +136,11 @@ ${pdfContext ? `\n${pdfContext.slice(0, 20000)}` : ""}
  * Responde una pregunta de seguimiento usando el contexto del tablero + historial de chat
  */
 export async function chat(userMessage, boardContext, history = []) {
-  // Groq free tier: 12K TPM — optimizamos contexto
-  const ctxCompleto = boardContext.slice(0, 3000);
+  // Groq 8B instant: 6K TPM — optimizamos contexto al máximo
+  const ctxCompleto = boardContext.slice(0, 1500);
 
-  const historialReciente = history.slice(-6).map(m =>
-    `${m.role === "user" ? "USUARIO" : "ASISTENTE"}: ${m.content?.slice(0, 400) || ""}`
+  const historialReciente = history.slice(-4).map(m =>
+    `${m.role === "user" ? "USUARIO" : "ASISTENTE"}: ${m.content?.slice(0, 200) || ""}`
   ).join("\n");
 
   const prompt = `Eres un asistente senior de gestión de proyectos para el proyecto "Proformax". Tu rol es responder con análisis profundos, concretos y útiles basados en los datos reales del tablero Trello y los documentos PDF del equipo.
@@ -167,7 +166,7 @@ RESPUESTA DETALLADA:`;
   return await callGroq(prompt, {
     model: "llama-3.1-8b-instant",
     temperature: 0.4,
-    maxTokens: 2048,
+    maxTokens: 1500,
     topP: 0.9
   });
 }
