@@ -5,10 +5,11 @@ import { config } from "./config.js";
 /**
  * Función genérica para llamar a la IA (Groq o Ollama)
  */
-async function callAI(prompt, model = "llama-3.1-8b-instant") {
+async function callAI(prompt, model = "llama3-8b-8192") {
   try {
     // Si hay Groq Key, usamos Groq (Cloud - Recomendado para Render)
     if (config.groqKey) {
+      console.log(`[IA] Usando Groq con modelo: ${model}`);
       const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -23,14 +24,17 @@ async function callAI(prompt, model = "llama-3.1-8b-instant") {
       });
 
       if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Groq API error: ${err}`);
+        const errBody = await res.text();
+        console.error(`[IA] Error Groq API (${res.status}):`, errBody);
+        throw new Error(`Groq falló: ${res.status}`);
       }
+      
       const data = await res.json();
       return data.choices[0]?.message?.content || "No hubo respuesta de la IA.";
     }
 
     // Fallback: Ollama local
+    console.log("[IA] Groq no configurado, intentando Ollama local...");
     const ollamaUrl = config.ollama || "http://127.0.0.1:11434";
     const res = await fetch(`${ollamaUrl}/api/generate`, {
       method: "POST",
@@ -92,6 +96,9 @@ Genera un informe ejecutivo breve:
  * Especial para reportes PDF - Análisis más profundo
  */
 export async function analyzeForReport(cards, lists, atrasadas = [], sinAsignar = [], pdfContext = "") {
+  // Limitamos el contexto de los PDFs a 1500 caracteres para no saturar los tokens de Groq
+  const pdfContextLimitado = pdfContext ? pdfContext.slice(0, 1500) : "";
+
   const prompt = `
 Genera un REPORTE DETALLADO para el PDF de gerencia.
 PROYECTO: PROFORMAX
@@ -102,7 +109,7 @@ DATOS:
 - Atrasadas: ${atrasadas.length}
 - Sin asignar: ${sinAsignar.length}
 
-${pdfContext ? `CONTEXTO TÉCNICO:\n${pdfContext.slice(0, 3000)}` : ""}
+${pdfContextLimitado ? `CONTEXTO TÉCNICO (resumen documentos):\n${pdfContextLimitado}` : ""}
 
 INSTRUCCIONES:
 - Sé formal y profesional.
@@ -110,7 +117,7 @@ INSTRUCCIONES:
 - Proporciona una visión técnica de los cuellos de botella.
 - No uses placeholders, sé específico con los datos entregados.`;
 
-  return await callAI(prompt, "llama-3.1-70b-versatile");
+  return await callAI(prompt, "llama3-70b-8192");
 }
 
 export async function chat(userMessage, boardContext, history = []) {
@@ -123,4 +130,4 @@ Usuario: ${userMessage}
 Respuesta corta y directa:`;
 
   return await callAI(prompt);
-}
+}
