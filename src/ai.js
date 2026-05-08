@@ -127,9 +127,9 @@ ${pdfContext ? `\n${pdfContext.slice(0, 20000)}` : ""}
 `;
 
   return await callGroq(prompt, {
-    model: "llama-3.3-70b-versatile",
+    model: "llama-3.1-8b-instant",
     temperature: 0.3,
-    maxTokens: 2048
+    maxTokens: 3000
   });
 }
 
@@ -241,9 +241,9 @@ Con el ritmo actual, ¿cuándo termina el proyecto? ¿Qué podría adelantar o r
 IMPORTANTE: Sé específico, usa nombres reales, no seas genérico. Este reporte lo leerá el cliente y el equipo directivo.`;
 
   return await callGroq(prompt, {
-    model: "llama-3.3-70b-versatile",
+    model: "llama-3.1-8b-instant",
     temperature: 0.3,
-    maxTokens: 3000,
+    maxTokens: 4096,
     topP: 0.85
   });
 }
