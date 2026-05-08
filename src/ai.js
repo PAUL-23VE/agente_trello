@@ -165,9 +165,9 @@ PREGUNTA DEL USUARIO: ${userMessage}
 RESPUESTA DETALLADA:`;
 
   return await callGroq(prompt, {
-    model: "llama-3.3-70b-versatile",
+    model: "llama-3.1-8b-instant",
     temperature: 0.4,
-    maxTokens: 1500,
+    maxTokens: 2048,
     topP: 0.9
   });
 }
