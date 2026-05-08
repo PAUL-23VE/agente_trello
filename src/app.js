@@ -127,13 +127,16 @@ async function runAnalysis() {
 
   // Incluir historial de análisis previos para contexto de evolución
   const historySummary = getHistorySummary(store);
-  const pdfCtxConHistorial = cachedPdfContext +
-    (historySummary ? "\n\n" + historySummary : "");
+  const pdfCtxConHistorial = cachedPdfContext + (historySummary ? "\n\n" + historySummary : "");
+  
+  // Limitar contexto para evitar Rate Limit (12K TPM en Groq Free)
+  const pdfContextLimitado = pdfCtxConHistorial.slice(0, 6000);
 
   console.log("[Agente] Analizando con IA...");
   let result = null;
   try {
-    result = await analyze(cards, lists, atrasadas, sinAsignar, pdfCtxConHistorial);
+    result = await analyze(cards, lists, atrasadas, sinAsignar, pdfContextLimitado);
+    if (result === "Error al contactar la IA.") throw new Error("Groq falló internamente");
   } catch (e) {
     console.error("[Agente] Error en analisis IA:", e.message);
     result = lastAnalysis || "Análisis no disponible temporalmente por límites de la API.";
