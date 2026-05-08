@@ -131,7 +131,14 @@ async function runAnalysis() {
     (historySummary ? "\n\n" + historySummary : "");
 
   console.log("[Agente] Analizando con IA...");
-  const result = await analyze(cards, lists, atrasadas, sinAsignar, pdfCtxConHistorial);
+  let result = null;
+  try {
+    result = await analyze(cards, lists, atrasadas, sinAsignar, pdfCtxConHistorial);
+  } catch (e) {
+    console.error("[Agente] Error en analisis IA:", e.message);
+    result = lastAnalysis || "Análisis no disponible temporalmente por límites de la API.";
+  }
+  
   lastAnalysis = result;
   lastAnalysisTime = new Date().toLocaleString("es-ES");
   console.log("[Agente] Analisis completo.");
@@ -145,7 +152,7 @@ async function runAnalysis() {
   };
 
   // ── PERSISTIR ────────────────────────────────────────────────
-  saveAnalysis(store, result, cachedStats);
+  saveAnalysis(store, lastAnalysis, cachedStats);
   saveStatsSnapshot(store, cachedStats);
 
   // ── ALERTAS PROACTIVAS ───────────────────────────────────────
