@@ -325,6 +325,11 @@ app.get("/api/report/pdf", async (req, res) => {
     // 3. Generar análisis profundo específico para este reporte (siempre nuevo)
     const analysisForPdf = await analyzeForReport(cards, lists, atrasadas, sinAsignar, pdfContext);
 
+    // Validar respuesta de la IA antes de generar el PDF
+    if (!analysisForPdf || analysisForPdf.includes("La IA no respondió") || analysisForPdf.toLowerCase().includes("error")) {
+      return res.status(500).json({ error: "No se pudo generar el análisis con IA. Intenta de nuevo más tarde." });
+    }
+
     console.log("[PDF] Análisis listo, generando documento...");
 
     // 4. Generar el PDF con todo el análisis fresco
@@ -341,7 +346,6 @@ app.get("/api/report/pdf", async (req, res) => {
     if (!res.headersSent) res.status(500).json({ error: e.message });
   }
 });
-
 // ── HEALTH CHECK (para mantener la app viva en Render) ─────────────────────
 app.get("/health", (req, res) => {
   res.json({

@@ -8,10 +8,13 @@ export const config = {
   boardId: process.env.BOARD_ID,
   // IA — Groq API (gratis, ultrarrápido)
   groqKey: process.env.GROQ_API_KEY,
-  // Email
+  // Email — Brevo HTTP API (Necesario para Render)
+  brevoKey: process.env.BREVO_API_KEY,
+  senderEmail: process.env.SMTP_USER || "paulvelastegui2016@gmail.com",
+  teamEmails: process.env.TEAM_EMAILS,
+  // SMTP fallback
   smtpHost: process.env.SMTP_HOST || "smtp.gmail.com",
-  smtpPort: process.env.SMTP_PORT || "587",
+  smtpPort: process.env.SMTP_PORT || "465",
   smtpUser: process.env.SMTP_USER,
-  smtpPass: process.env.SMTP_PASS,
-  teamEmails: process.env.TEAM_EMAILS  // separados por coma: "a@x.com,b@x.com"
+  smtpPass: process.env.SMTP_PASS
 };

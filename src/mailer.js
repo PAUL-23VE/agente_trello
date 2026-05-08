@@ -3,258 +3,119 @@ import nodemailer from "nodemailer";
 import { config } from "./config.js";
 
 /**
- * Crea el transporter según la config del .env
- * Soporta puerto 465 (SSL directo) y 587 (STARTTLS)
+ * Envía un correo usando la API HTTP de Brevo (Bypassa el bloqueo SMTP de Render)
  */
-function createTransporter(port = null) {
-  const usePort = port || Number(config.smtpPort) || 465;
-  const isSecure = usePort === 465;
+async function sendViaBrevo(mailOptions) {
+  if (!config.brevoKey) return null;
 
-  return nodemailer.createTransport({
+  const to = mailOptions.to.split(",").map(email => ({ email: email.trim() }));
+  
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "accept": "application/json",
+      "content-type": "application/json",
+      "api-key": config.brevoKey
+    },
+    body: JSON.stringify({
+      sender: { name: "Agente IA Proformax", email: config.senderEmail },
+      to: to,
+      subject: mailOptions.subject,
+      htmlContent: mailOptions.html
+    })
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Brevo API error: ${err}`);
+  }
+
+  return await res.json();
+}
+
+/**
+ * Fallback SMTP (Para local)
+ */
+async function sendViaSmtp(mailOptions) {
+  const transporter = nodemailer.createTransport({
     host: config.smtpHost,
-    port: usePort,
-    secure: isSecure,               // true para 465 (SSL), false para 587 (STARTTLS)
+    port: Number(config.smtpPort) || 465,
+    secure: Number(config.smtpPort) === 465,
     auth: {
       user: config.smtpUser,
       pass: config.smtpPass
-    },
-    connectionTimeout: 30000,       // 30s para conectar
-    greetingTimeout: 30000,         // 30s para el greeting
-    socketTimeout: 60000,           // 60s para operaciones
-    pool: false,                    // sin pool para evitar problemas en PaaS
-    tls: {
-      rejectUnauthorized: false     // aceptar certificados auto-firmados
     }
   });
+
+  return await transporter.sendMail(mailOptions);
 }
 
-/**
- * Envía un correo con reintentos y fallback de puerto
- * Intenta primero con el puerto configurado, luego con el alternativo
- */
-async function sendWithRetry(mailOptions, maxRetries = 3) {
-  const ports = [Number(config.smtpPort) || 465, 587, 465];
-  const uniquePorts = [...new Set(ports)];
-
-  for (const port of uniquePorts) {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        const transporter = createTransporter(port);
-        console.log(`[Mailer] Intento ${attempt}/${maxRetries} via puerto ${port}...`);
-        const info = await transporter.sendMail(mailOptions);
-        console.log(`[Mailer] ✓ Enviado via puerto ${port} al intento ${attempt}`);
-        return info;
-      } catch (err) {
-        const isTimeout = err.message.includes("timeout") || err.message.includes("ETIMEDOUT") || err.code === "ESOCKET";
-        console.warn(`[Mailer] ✗ Puerto ${port}, intento ${attempt}: ${err.message}`);
-
-        if (attempt < maxRetries && isTimeout) {
-          const delay = attempt * 5000; // 5s, 10s, 15s
-          console.log(`[Mailer] Reintentando en ${delay / 1000}s...`);
-          await new Promise(r => setTimeout(r, delay));
-        } else if (attempt === maxRetries) {
-          console.warn(`[Mailer] Agotados reintentos para puerto ${port}`);
-          break; // probar siguiente puerto
-        }
-      }
+async function unifiedSend(mailOptions) {
+  try {
+    const brevo = await sendViaBrevo(mailOptions);
+    if (brevo) {
+      console.log("[Mailer] Enviado via Brevo API");
+      return { ok: true, messageId: brevo.messageId };
     }
+  } catch (e) {
+    console.warn("[Mailer] Falló Brevo, intentando SMTP...", e.message);
   }
 
-  throw new Error("No se pudo enviar el correo después de todos los intentos y puertos");
+  const smtp = await sendViaSmtp(mailOptions);
+  console.log("[Mailer] Enviado via SMTP");
+  return { ok: true, messageId: smtp.messageId };
 }
 
-/**
- * Convierte texto plano con markdown básico a HTML bonito para el correo
- */
 function toHtml(text) {
-  const escaped = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-  return escaped
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/^### (.+)$/gm, "<h3 style='color:#1a73e8;margin:12px 0 4px'>$1</h3>")
-    .replace(/^## (.+)$/gm, "<h2 style='color:#1a73e8;margin:16px 0 6px'>$1</h2>")
-    .replace(/^# (.+)$/gm, "<h1 style='color:#1a73e8;margin:20px 0 8px'>$1</h1>")
-    .replace(/^[-*] (.+)$/gm, "<li style='margin:4px 0'>$1</li>")
-    .replace(/(<li[^>]*>.*<\/li>\n?)+/g, m => `<ul style='padding-left:20px;margin:8px 0'>${m}</ul>`)
-    .replace(/\n\n/g, "</p><p style='margin:8px 0'>")
-    .replace(/\n/g, "<br/>");
+  return text
+    .replace(/\n/g, "<br/>")
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/### (.*?)\n/g, "<h3>$1</h3>");
 }
 
-/**
- * Envía el reporte de progreso a todos los integrantes
- * @param {string} analysis - Texto del análisis de la IA
- * @param {Array}  pdfsLeidos - Array de PDFs procesados
- * @param {Object} stats - { total, completadas, atrasadas, pct }
- */
 export async function sendProgressReport(analysis, pdfsLeidos = [], stats = {}) {
-  if (!config.smtpUser || !config.teamEmails) {
-    console.warn("[Mailer] No configurado. Agrega SMTP_USER y TEAM_EMAILS al .env");
-    return { ok: false, reason: "Sin configuración SMTP" };
-  }
-
-  const recipients = config.teamEmails.split(",").map(e => e.trim()).filter(Boolean);
-  const fecha = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
-
-  // Sección PDFs
-  const pdfsHtml = pdfsLeidos.length > 0
-    ? `<h2 style='color:#1a73e8'>📎 Documentos analizados (${pdfsLeidos.length})</h2>
-       <ul style='padding-left:20px'>
-         ${pdfsLeidos.map(p => `<li><strong>${p.nombre}</strong> — ${p.paginas} pág. — subido: ${p.subido}</li>`).join("")}
-       </ul>`
-    : `<p style='color:#888'>No hay documentos PDF en la carpeta /docs.</p>`;
-
-  // Badges de stats
-  const badgeColor = (n, ok = 0) => n > ok ? "#f44336" : "#4caf50";
-  const statsHtml = `
-    <div style='display:flex;gap:16px;flex-wrap:wrap;margin:16px 0'>
-      <div style='background:#1a73e8;color:#fff;padding:12px 20px;border-radius:8px;text-align:center'>
-        <div style='font-size:28px;font-weight:700'>${stats.total || 0}</div>
-        <div style='font-size:11px;text-transform:uppercase'>Total tareas</div>
-      </div>
-      <div style='background:#4caf50;color:#fff;padding:12px 20px;border-radius:8px;text-align:center'>
-        <div style='font-size:28px;font-weight:700'>${stats.completadas || 0}</div>
-        <div style='font-size:11px;text-transform:uppercase'>Completadas</div>
-      </div>
-      <div style='background:${badgeColor(stats.atrasadas)};color:#fff;padding:12px 20px;border-radius:8px;text-align:center'>
-        <div style='font-size:28px;font-weight:700'>${stats.atrasadas || 0}</div>
-        <div style='font-size:11px;text-transform:uppercase'>Atrasadas</div>
-      </div>
-      <div style='background:#ff9800;color:#fff;padding:12px 20px;border-radius:8px;text-align:center'>
-        <div style='font-size:28px;font-weight:700'>${stats.pct || 0}%</div>
-        <div style='font-size:11px;text-transform:uppercase'>Avance</div>
-      </div>
-    </div>`;
+  const recipients = config.teamEmails;
+  const fecha = new Date().toLocaleDateString("es-ES");
 
   const html = `
-<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"/></head>
-<body style='font-family:Segoe UI,Arial,sans-serif;background:#f5f5f5;padding:0;margin:0'>
-  <div style='max-width:680px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.1)'>
-
-    <!-- HEADER -->
-    <div style='background:linear-gradient(135deg,#1a73e8,#0d47a1);padding:32px;text-align:center'>
-      <div style='font-size:40px'>🤖</div>
-      <h1 style='color:#fff;margin:8px 0 4px;font-size:22px'>Reporte de Progreso — Proformax</h1>
-      <p style='color:#90caf9;margin:0;font-size:14px'>${fecha}</p>
-    </div>
-
-    <!-- STATS -->
-    <div style='padding:24px 32px 0'>
-      <h2 style='color:#333;margin:0 0 12px'>📊 Estado del Proyecto</h2>
-      ${statsHtml}
-    </div>
-
-    <!-- ANÁLISIS -->
-    <div style='padding:24px 32px'>
-      <h2 style='color:#333;margin:0 0 12px'>🧠 Análisis del Agente IA</h2>
-      <div style='background:#f8f9fa;border-left:4px solid #1a73e8;border-radius:4px;padding:16px;font-size:14px;line-height:1.7;color:#333'>
-        <p style='margin:8px 0'>${toHtml(analysis)}</p>
+    <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px;">
+      <h2 style="color: #1a73e8;">Reporte de Progreso — Proformax</h2>
+      <p><strong>Fecha:</strong> ${fecha}</p>
+      <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+        ${toHtml(analysis)}
       </div>
+      <div style="margin-top: 20px;">
+        <p><strong>Tareas:</strong> ${stats.total} | <strong>Completadas:</strong> ${stats.completadas} (${stats.pct}%)</p>
+      </div>
+      <hr/>
+      <p style="font-size: 12px; color: #666;">Generado automáticamente por Trello AI Agent</p>
     </div>
-
-    <!-- PDFs -->
-    <div style='padding:0 32px 24px'>
-      ${pdfsHtml}
-    </div>
-
-    <!-- FOOTER -->
-    <div style='background:#f5f5f5;padding:16px 32px;text-align:center;border-top:1px solid #e0e0e0'>
-      <p style='color:#999;font-size:12px;margin:0'>
-        Este reporte fue generado automáticamente por el Agente IA de Proformax.<br/>
-        Reporte enviado el ${new Date().toLocaleString("es-ES")}
-      </p>
-    </div>
-  </div>
-</body>
-</html>`;
+  `;
 
   try {
-    const info = await sendWithRetry({
-      from: `"Agente IA Proformax" <${config.smtpUser}>`,
-      to: recipients.join(", "),
-      subject: `📊 Reporte Proformax — ${fecha} | Avance: ${stats.pct || 0}%`,
+    return await unifiedSend({
+      to: recipients,
+      subject: `📊 Reporte Proformax — ${fecha} | Avance: ${stats.pct}%`,
       html
     });
-
-    console.log(`[Mailer] Correo enviado a: ${recipients.join(", ")} | ID: ${info.messageId}`);
-    return { ok: true, recipients, messageId: info.messageId };
   } catch (err) {
-    console.error("[Mailer] Error enviando correo:", err.message);
+    console.error("[Mailer] Error fatal:", err.message);
     return { ok: false, reason: err.message };
   }
 }
 
-/**
- * Envía una alerta urgente cuando se detectan tareas recién atrasadas
- * @param {string[]} tareasAtrasadas - Nombres de tareas que se acaban de atrasar
- * @param {Array} allCards - Todas las tarjetas para buscar detalles
- */
 export async function sendAlertEmail(tareasAtrasadas, allCards = []) {
-  if (!config.smtpUser || !config.teamEmails) {
-    return { ok: false, reason: "Sin configuración SMTP" };
-  }
-
-  const recipients = config.teamEmails.split(",").map(e => e.trim()).filter(Boolean);
-  const fecha = new Date().toLocaleString("es-ES");
-
-  const tareasHtml = tareasAtrasadas.map(nombre => {
-    const card = allCards.find(c => c.nombre === nombre);
-    const vencio = card?.fecha ? new Date(card.fecha).toLocaleDateString("es-ES") : "sin fecha";
-    const dias = card?.fecha ? Math.floor((new Date() - new Date(card.fecha)) / (1000*60*60*24)) : 0;
-    return `<tr>
-      <td style="padding:10px 14px;border-bottom:1px solid #ffcdd2"><strong>${nombre}</strong></td>
-      <td style="padding:10px 14px;border-bottom:1px solid #ffcdd2;color:#c62828">${vencio}</td>
-      <td style="padding:10px 14px;border-bottom:1px solid #ffcdd2;color:#c62828;font-weight:700">${dias} día(s)</td>
-    </tr>`;
-  }).join("");
-
-  const html = `
-<!DOCTYPE html>
-<html><head><meta charset="UTF-8"/></head>
-<body style="font-family:Segoe UI,Arial,sans-serif;background:#f5f5f5;padding:0;margin:0">
-  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.1)">
-    <div style="background:linear-gradient(135deg,#c62828,#e65100);padding:28px;text-align:center">
-      <div style="font-size:36px">⚠️</div>
-      <h1 style="color:#fff;margin:8px 0 4px;font-size:20px">ALERTA — Tareas Atrasadas Detectadas</h1>
-      <p style="color:#ffcdd2;margin:0;font-size:13px">${fecha}</p>
-    </div>
-    <div style="padding:24px 28px">
-      <p style="color:#333;font-size:14px;margin:0 0 16px">
-        El agente detectó <strong style="color:#c62828">${tareasAtrasadas.length} tarea(s)</strong> que se han atrasado recientemente:
-      </p>
-      <table style="width:100%;border-collapse:collapse;background:#fff8f8;border-radius:8px;overflow:hidden">
-        <thead>
-          <tr style="background:#ffebee">
-            <th style="padding:10px 14px;text-align:left;font-size:12px;color:#c62828">TAREA</th>
-            <th style="padding:10px 14px;text-align:left;font-size:12px;color:#c62828">VENCIÓ</th>
-            <th style="padding:10px 14px;text-align:left;font-size:12px;color:#c62828">ATRASO</th>
-          </tr>
-        </thead>
-        <tbody>${tareasHtml}</tbody>
-      </table>
-      <p style="color:#888;font-size:12px;margin:20px 0 0;text-align:center">
-        Revisa el tablero y toma acción inmediata. Este correo fue generado automáticamente por el Agente IA de Proformax.
-      </p>
-    </div>
-  </div>
-</body></html>`;
+  const recipients = config.teamEmails;
+  const html = `<h3>⚠️ Alerta de Tareas Atrasadas</h3><ul>${tareasAtrasadas.map(t => `<li>${t}</li>`).join("")}</ul>`;
 
   try {
-    const info = await sendWithRetry({
-      from: `"⚠️ Alerta Proformax" <${config.smtpUser}>`,
-      to: recipients.join(", "),
-      subject: `⚠️ ALERTA: ${tareasAtrasadas.length} tarea(s) atrasada(s) — ${new Date().toLocaleDateString("es-ES")}`,
+    return await unifiedSend({
+      to: recipients,
+      subject: `⚠️ ALERTA: ${tareasAtrasadas.length} tareas atrasadas`,
       html
     });
-
-    console.log(`[Mailer] Alerta enviada a: ${recipients.join(", ")}`);
-    return { ok: true, recipients, messageId: info.messageId };
   } catch (err) {
-    console.error("[Mailer] Error enviando alerta:", err.message);
+    console.error("[Mailer] Error en alerta:", err.message);
     return { ok: false, reason: err.message };
   }
 }
