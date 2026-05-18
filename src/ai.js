@@ -5,7 +5,7 @@ import { config } from "./config.js";
 /**
  * Función genérica para llamar a la IA (Groq o Ollama)
  */
-async function callAI(prompt, model = "llama3-8b-8192") {
+async function callAI(prompt, model = "llama-3.1-8b-instant") {
   try {
     // Si hay Groq Key, usamos Groq (Cloud - Recomendado para Render)
     if (config.groqKeys && config.groqKeys.length > 0) {
@@ -133,7 +133,7 @@ INSTRUCCIONES:
 - Proporciona una visión técnica de los cuellos de botella.
 - No uses placeholders, sé específico con los datos entregados.`;
 
-  return await callAI(prompt, "llama3-70b-8192");
+  return await callAI(prompt, "llama-3.3-70b-versatile");
 }
 
 export async function chat(userMessage, boardContext, history = []) {
