@@ -8,29 +8,45 @@ import { config } from "./config.js";
 async function callAI(prompt, model = "llama3-8b-8192") {
   try {
     // Si hay Groq Key, usamos Groq (Cloud - Recomendado para Render)
-    if (config.groqKey) {
-      console.log(`[IA] Usando Groq con modelo: ${model}`);
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${config.groqKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.7
-        })
-      });
-
-      if (!res.ok) {
-        const errBody = await res.text();
-        console.error(`[IA] Error Groq API (${res.status}):`, errBody);
-        throw new Error(`Groq falló: ${res.status}`);
-      }
+    if (config.groqKeys && config.groqKeys.length > 0) {
+      // Mezclar llaves para empezar con una aleatoria y usar las demás como fallback
+      const shuffledKeys = [...config.groqKeys].sort(() => 0.5 - Math.random());
       
-      const data = await res.json();
-      return data.choices[0]?.message?.content || "No hubo respuesta de la IA.";
+      for (let i = 0; i < shuffledKeys.length; i++) {
+        const keyToUse = shuffledKeys[i];
+        console.log(`[IA] Usando Groq con modelo: ${model} (Intento ${i+1}/${shuffledKeys.length})`);
+        
+        try {
+          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${keyToUse}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              model: model,
+              messages: [{ role: "user", content: prompt }],
+              temperature: 0.7
+            })
+          });
+
+          if (!res.ok) {
+            const errBody = await res.text();
+            console.error(`[IA] Error Groq API (${res.status}):`, errBody);
+            // Si es error de rate limit (429), y quedan más llaves, intentar con la siguiente
+            if (res.status === 429 && i < shuffledKeys.length - 1) {
+              console.warn("[IA] Límite de tokens alcanzado. Cambiando a otra llave API...");
+              continue; // Salta al siguiente iterador del for
+            }
+            throw new Error(`Groq falló: ${res.status}`);
+          }
+          
+          const data = await res.json();
+          return data.choices[0]?.message?.content || "No hubo respuesta de la IA.";
+        } catch (innerError) {
+          if (i === shuffledKeys.length - 1) throw innerError; // Si es el último, lanza el error
+        }
+      }
     }
 
     // Fallback: Ollama local
