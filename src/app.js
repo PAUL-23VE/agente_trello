@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import fs from "fs";
 import cron from "node-cron";
-import { getBoardData } from "./trello.js";
+import { getBoardData, createCard } from "./trello.js";
 import { analyze, chat, analyzeForReport } from "./ai.js";
 import { readAllPDFs, listDocs, DOCS_FOLDER } from "./pdf.js";
 import { sendProgressReport, sendAlertEmail } from "./mailer.js";
@@ -222,7 +222,57 @@ app.post("/api/chat", async (req, res) => {
     const ctxCompleto = tablero.slice(0, 1500) +
       (cachedPdfContext ? "\n\n" + cachedPdfContext.slice(0, 1500) : "");
 
-    const reply = await chat(message, ctxCompleto, history);
+    let reply = await chat(message, ctxCompleto, history);
+
+    // Interceptar comando de creación de tarjeta (más flexible con o sin comillas)
+    const createCardMatch = reply.match(/\[\[CREATE_CARD:\s*([^|\]]+?)\s*\|\s*([^|\]]+?)\s*(?:\|\s*([^|\]]*?)\s*)?\]\]/i);
+    if (createCardMatch) {
+      const fullMatch = createCardMatch[0];
+      const listName = createCardMatch[1].replace(/^["']|["']$/g, '').trim();
+      const cardTitle = createCardMatch[2].replace(/^["']|["']$/g, '').trim();
+      const cardDesc = createCardMatch[3] ? createCardMatch[3].replace(/^["']|["']$/g, '').trim() : "";
+      
+      // Buscar ID de la lista por nombre
+      const boardData = cachedBoardData || await getBoardData();
+      const targetList = boardData.lists.find(l => l.name.toLowerCase().includes(listName.toLowerCase()));
+      
+      if (targetList) {
+        const created = await createCard(targetList.id, cardTitle, cardDesc || "");
+        if (created) {
+          reply = reply.replace(fullMatch, `\n\n✅ **He creado la tarjeta exitosamente** en la lista "${targetList.name}".`);
+          // Refrescar caché
+          runAnalysis(); // Actualiza el tablero en background
+        } else {
+          reply = reply.replace(fullMatch, `\n\n❌ **Error:** No pude crear la tarjeta por un problema con la API de Trello.`);
+        }
+      } else {
+        reply = reply.replace(fullMatch, `\n\n❌ **Error:** No encontré ninguna lista llamada "${listName}" en este tablero.`);
+      }
+    }
+
+    // Interceptar comando de revisión de PR
+    const reviewPRMatch = reply.match(/\[\[REVIEW_PR\]\]/i);
+    if (reviewPRMatch) {
+      try {
+        const fetch = (await import('node-fetch')).default;
+        const port = process.env.PORT || 3000;
+        const resGit = await fetch(`http://localhost:${port}/api/github/review`, { 
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ createCard: false }) // 👈 Clave: No crear tarjeta
+        });
+        const gitData = await resGit.json();
+        
+        // Mostrar el contenido de la revisión directamente en el chat
+        const prList = (gitData.reviews || []).map(r => `**PR #${r.pr} (${r.repo})**:\n${r.review}`).join("\n\n---\n\n");
+        const finalText = prList ? prList : "No hay PRs abiertos en este momento.";
+        
+        reply = reply.replace(reviewPRMatch[0], `\n\n✅ **Revisión de GitHub Completada:**\n\n${finalText}`);
+      } catch (err) {
+        reply = reply.replace(reviewPRMatch[0], `\n\n❌ **Error al ejecutar revisión de GitHub:** ${err.message}`);
+      }
+    }
+
     res.json({ reply });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -371,6 +421,60 @@ app.get("/api/trigger/daily-report", async (req, res) => {
   }
 });
 
+// ── INTEGRACIÓN GITHUB & TRELLO (CODE REVIEW) ──────────────────────────────
+import { getOpenPRs, getPRDiff, postReviewComment } from "./github.js";
+import { reviewCode } from "./ai.js";
+import { config } from "./config.js";
+
+app.post("/api/github/review", async (req, res) => {
+  console.log("[GitHub] Iniciando revisión de PRs...");
+  try {
+    const prs = await getOpenPRs();
+    if (!prs || prs.length === 0) {
+      return res.json({ message: "No hay PRs abiertos para revisar." });
+    }
+
+    const reviews = [];
+    for (const pr of prs) {
+      console.log(`[GitHub] Analizando PR #${pr.number}: ${pr.title} (${pr.repository})`);
+      
+      const diffText = await getPRDiff(pr.repository, pr.number);
+      if (!diffText) {
+        console.log(`[GitHub] No se pudo obtener el diff del PR #${pr.number} en ${pr.repository}`);
+        continue;
+      }
+
+      // 1. Revisar el código con IA
+      const reviewResult = await reviewCode(pr.title, diffText);
+      
+      // 2. (Opcional) Publicar el comentario directamente en GitHub
+      // await postReviewComment(pr.repository, pr.number, reviewResult);
+
+      // 3. Crear una tarjeta en Trello con el resumen de la revisión (solo si no se deshabilitó explícitamente)
+      const shouldCreateCard = req.body.createCard !== false;
+      if (shouldCreateCard) {
+        const boardData = await getBoardData();
+        if (boardData.lists && boardData.lists.length > 0) {
+          const listId = boardData.lists[0].id; // Se pone en la primera columna (To Do / Backlog)
+          await createCard(
+            listId, 
+            `🤖 PR #${pr.number} [${pr.repository.split('/')[1]}]: ${pr.title}`, 
+            `**Revisión automática de código (${pr.repository}):**\n\n${reviewResult}\n\n[Ver PR en GitHub](${pr.html_url})`
+          );
+          console.log(`[Trello] Tarjeta creada para el PR #${pr.number} de ${pr.repository}`);
+        }
+      }
+
+      reviews.push({ pr: pr.number, repo: pr.repository, title: pr.title, review: reviewResult });
+    }
+
+    res.json({ message: "Revisión completada", reviews });
+  } catch (e) {
+    console.error("[GitHub] Error en la rutina de revisión:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── INICIO ─────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
@@ -382,6 +486,20 @@ app.listen(PORT, () => {
 cron.schedule("*/30 * * * *", () => {
   console.log("[Cron] Analisis automatico...");
   runAnalysis();
+});
+
+// Revisión de GitHub automática cada hora
+cron.schedule("0 * * * *", async () => {
+  if (config.githubToken && config.githubRepo) {
+    console.log("[Cron] Iniciando revisión de GitHub automática...");
+    try {
+      // Simular la llamada a la ruta de revisión
+      const fetch = (await import('node-fetch')).default;
+      await fetch(`http://localhost:${PORT}/api/github/review`, { method: "POST" });
+    } catch (e) {
+      console.error("[Cron] Error ejecutando GitHub review:", e.message);
+    }
+  }
 });
 
 // Correo automático diario a las 8:00 AM

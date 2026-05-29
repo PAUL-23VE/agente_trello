@@ -138,12 +138,46 @@ INSTRUCCIONES:
 
 export async function chat(userMessage, boardContext, history = []) {
   const historyText = history.slice(-5).map(h => `${h.role}: ${h.content}`).join("\n");
-  const prompt = `Eres un asistente de gestión de proyectos. Contexto del tablero:
+  const prompt = `Eres un asistente de gestión de proyectos conectado a Trello. Contexto del tablero:
 ${boardContext}
 
 ${historyText ? `Historial:\n${historyText}` : ""}
 Usuario: ${userMessage}
-Respuesta corta y directa:`;
+
+Instrucciones:
+1. Responde de forma corta, directa y natural.
+2. SOLO si el usuario te pide EXPRESAMENTE crear/añadir una tarjeta en Trello, DEBES incluir EXACTAMENTE esta etiqueta en tu respuesta:
+[[CREATE_CARD: Nombre de la lista | Título de la tarjeta | Descripción opcional]]
+(Asegúrate de usar un "Nombre de la lista" válido, ej: Fase 3: Desarrollo).
+3. Si el usuario te pide "revisar un Pull Request", "revisar código", "ver mi código" o sugerir mejoras en el código, DEBES incluir EXACTAMENTE esta etiqueta:
+[[REVIEW_PR]]
+4. Para cualquier otra conversación, responde normalmente sin usar etiquetas.`;
 
   return await callAI(prompt);
+}
+
+/**
+ * Especial para revisar Pull Requests (Code Review)
+ */
+export async function reviewCode(prTitle, diffText) {
+  // Limitar diffText para evitar Rate Limit (aproximadamente 3000 caracteres)
+  const diffLimitado = diffText ? diffText.slice(0, 3000) : "";
+  
+  const prompt = `
+Eres un Ingeniero de Software Senior (Senior Developer). Tu tarea es hacer un Code Review de un Pull Request.
+Título del PR: "${prTitle}"
+
+A continuación tienes el código modificado (DIFF):
+\`\`\`diff
+${diffLimitado}
+\`\`\`
+
+Instrucciones:
+1. Analiza los cambios en el código.
+2. Identifica posibles bugs, errores lógicos o malas prácticas.
+3. Si el código parece correcto, indícalo brevemente.
+4. Genera tu respuesta en formato Markdown, estructurada y profesional. No saludes, ve directo a los hallazgos.
+`;
+
+  return await callAI(prompt, "llama-3.3-70b-versatile");
 }

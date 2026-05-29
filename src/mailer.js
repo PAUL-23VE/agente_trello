@@ -74,7 +74,12 @@ function toHtml(text) {
 }
 
 export async function sendProgressReport(analysis, pdfsLeidos = [], stats = {}) {
-  const recipients = config.teamEmails;
+  // El reporte de progreso global solo se envía al Product Owner
+  const recipients = config.poEmail ? [config.poEmail] : [];
+  if (recipients.length === 0) {
+    console.warn("[Mailer] No hay poEmail configurado para el reporte diario.");
+    return { ok: false, reason: "No PO email configured" };
+  }
   const fecha = new Date().toLocaleDateString("es-ES");
 
   const html = `
@@ -105,17 +110,63 @@ export async function sendProgressReport(analysis, pdfsLeidos = [], stats = {}) 
 }
 
 export async function sendAlertEmail(tareasAtrasadas, allCards = []) {
-  const recipients = config.teamEmails;
-  const html = `<h3>⚠️ Alerta de Tareas Atrasadas</h3><ul>${tareasAtrasadas.map(t => `<li>${t}</li>`).join("")}</ul>`;
+  if (!config.memberEmails || !config.poEmail) {
+    console.warn("[Mailer] memberEmails o poEmail no configurados en config.js");
+    return { ok: false, reason: "Configuración de correos incompleta" };
+  }
 
-  try {
-    return await unifiedSend({
-      to: recipients,
-      subject: `⚠️ ALERTA: ${tareasAtrasadas.length} tareas atrasadas`,
-      html
-    });
-  } catch (err) {
-    console.error("[Mailer] Error en alerta:", err.message);
-    return { ok: false, reason: err.message };
+  // Mapa de usuario -> Tareas
+  const tasksByEmail = {};
+  
+  // El PO siempre recibe todas las tareas
+  tasksByEmail[config.poEmail] = [...tareasAtrasadas];
+
+  // Distribuir a los desarrolladores
+  tareasAtrasadas.forEach(tareaNombre => {
+    // Buscar la tarjeta completa para ver quién está asignado
+    const card = allCards.find(c => c.nombre === tareaNombre);
+    if (card && card.memberUsernames) {
+      card.memberUsernames.forEach(username => {
+        const email = config.memberEmails[username];
+        if (email && email !== config.poEmail) {
+          if (!tasksByEmail[email]) tasksByEmail[email] = [];
+          tasksByEmail[email].push(tareaNombre);
+        }
+      });
+    }
+  });
+
+  let lastResult = null;
+  const sentEmails = [];
+
+  // Enviar un correo personalizado a cada persona
+  for (const [email, tasks] of Object.entries(tasksByEmail)) {
+    if (tasks.length === 0) continue;
+
+    const isPO = email === config.poEmail;
+    const title = isPO 
+      ? `⚠️ ALERTA GLOBAL: ${tasks.length} tareas atrasadas en el proyecto`
+      : `⚠️ Tienes ${tasks.length} tarea(s) atrasada(s) asignada(s)`;
+
+    const html = `<h3>${title}</h3>
+      <p>Hola, las siguientes tareas requieren tu atención inmediata:</p>
+      <ul>${tasks.map(t => `<li>${t}</li>`).join("")}</ul>`;
+
+    try {
+      lastResult = await unifiedSend({
+        to: email, // enviamos solo a esta persona
+        subject: title,
+        html
+      });
+      if (lastResult && lastResult.ok) sentEmails.push(email);
+    } catch (err) {
+      console.error(`[Mailer] Error enviando alerta a ${email}:`, err.message);
+    }
+  }
+
+  if (sentEmails.length > 0) {
+    return { ok: true, recipients: sentEmails, messageId: lastResult?.messageId };
+  } else {
+    return { ok: false, reason: "No emails sent" };
   }
 }

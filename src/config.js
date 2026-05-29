@@ -19,5 +19,21 @@ export const config = {
   smtpHost: process.env.SMTP_HOST || "smtp.gmail.com",
   smtpPort: process.env.SMTP_PORT || "465",
   smtpUser: process.env.SMTP_USER,
-  smtpPass: process.env.SMTP_PASS
+  smtpPass: process.env.SMTP_PASS,
+  // GitHub Integration
+  githubToken: process.env.GITHUB_TOKEN,
+  githubRepos: (process.env.GITHUB_REPOS || process.env.GITHUB_REPO || "")
+    .split(",")
+    .map(r => r.trim())
+    .filter(r => r.length > 0),
+  // Mapeo de miembros de Trello a sus correos (Ajustar nombres según devueltos por Trello)
+  memberEmails: {
+    // Ejemplo: "nombredetrello": "correo@gmail.com"
+    "davidgiler": "davidgiler21@gmail.com",
+    "paulvelastegui": "paulvelastegui2016@gmail.com",
+    "araguangasig95": "araguangasig95@gmail.com",
+    "mayckolchavez": "mayckolchavez27@gmail.com",
+    "pt": "pt@example.com" // Placeholder para otros miembros vistos en el tablero
+  },
+  poEmail: "davidgiler21@gmail.com"
 };
